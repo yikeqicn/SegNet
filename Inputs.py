@@ -6,12 +6,14 @@ import numpy as np
 import math
 import skimage
 import skimage.io
+from args import *
+#global FLAGS
 
-IMAGE_HEIGHT = 360
-IMAGE_WIDTH = 480
-IMAGE_DEPTH = 3
+IMAGE_HEIGHT = FLAGS.image_h#360 yike
+IMAGE_WIDTH = FLAGS.image_w#480 yike
+IMAGE_DEPTH = FLAGS.image_c#3 yike
 
-NUM_CLASSES = 11
+NUM_CLASSES = FLAGS.num_class#11
 NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = 367
 NUM_EXAMPLES_PER_EPOCH_FOR_TEST = 101
 NUM_EXAMPLES_PER_EPOCH_FOR_EVAL = 1

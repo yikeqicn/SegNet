@@ -13,6 +13,7 @@ from tensorflow.python.ops import gen_nn_ops
 # modules
 from Utils import _variable_with_weight_decay, _variable_on_cpu, _add_loss_summaries, _activation_summary, print_hist_summery, get_hist, per_class_acc, writeImage
 from Inputs import *
+from args import *
 
 # Constants describing the training process.
 MOVING_AVERAGE_DECAY = 0.9999     # The decay to use for the moving average.
@@ -20,14 +21,14 @@ NUM_EPOCHS_PER_DECAY = 350.0      # Epochs after which learning rate decays.
 LEARNING_RATE_DECAY_FACTOR = 0.1  # Learning rate decay factor.
 
 INITIAL_LEARNING_RATE = 0.001      # Initial learning rate.
-EVAL_BATCH_SIZE = 5
-BATCH_SIZE = 5
+EVAL_BATCH_SIZE = FLAGS.batch_size
+BATCH_SIZE = FLAGS.batch_size
 # for CamVid
-IMAGE_HEIGHT = 360
-IMAGE_WIDTH = 480
-IMAGE_DEPTH = 3
+IMAGE_HEIGHT = FLAGS.image_h
+IMAGE_WIDTH = FLAGS.image_w
+IMAGE_DEPTH = FLAGS.image_c
 
-NUM_CLASSES = 12
+NUM_CLASSES = FLAGS.num_class+1
 NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = 367
 NUM_EXAMPLES_PER_EPOCH_FOR_TEST = 101
 NUM_EXAMPLES_PER_EPOCH_FOR_EVAL = 1
@@ -53,12 +54,12 @@ def orthogonal_initializer(scale = 1.1):
       return tf.constant(scale * q[:shape[0], :shape[1]], dtype=tf.float32)
     return _initializer
 
-def loss(logits, labels,FLAGS):
+def loss(logits, labels):
   """
       loss func without re-weighting
   """
   # Calculate the average cross entropy loss across the batch.
-  logits = tf.reshape(logits, (-1,FLAGS.num_class+1))#NUM_CLASSES))
+  logits = tf.reshape(logits, (-1,NUM_CLASSES))
   labels = tf.reshape(labels, [-1])
 
   cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
@@ -96,7 +97,7 @@ def weighted_loss(logits, labels, num_classes, head=None):
 
     return loss
 
-def cal_loss(logits, labels, FLAGS):
+def cal_loss(logits, labels):
     loss_weight = np.array([
       0.2595,
       0.1826,
@@ -113,7 +114,7 @@ def cal_loss(logits, labels, FLAGS):
 
     labels = tf.cast(labels, tf.int32)
     # return loss(logits, labels)
-    return weighted_loss(logits, labels, num_classes=FLAGS.num_class+1, head=loss_weight) #yike
+    return weighted_loss(logits, labels, num_classes=NUM_CLASSES, head=loss_weight)
 
 def conv_layer_with_bn(inputT, shape, train_phase, activation=True, name=None):
     in_channel = shape[2]
@@ -171,7 +172,7 @@ def batch_norm_layer(inputT, is_training, scope):
                            updates_collections=None, center=False, scope=scope+"_bn", reuse = True))
 
 
-def inference(images, labels, batch_size, phase_train,FLAGS):
+def inference(images, labels, batch_size, phase_train):
     # norm1
     norm1 = tf.nn.lrn(images, depth_radius=5, bias=1.0, alpha=0.0001, beta=0.75,
                 name='norm1')
@@ -230,15 +231,15 @@ def inference(images, labels, batch_size, phase_train,FLAGS):
     # output predicted class number (6)
     with tf.variable_scope('conv_classifier') as scope:
       kernel = _variable_with_weight_decay('weights',
-                                           shape=[1, 1, 64,FLAGS.num_class+1],# NUM_CLASSES],yike
+                                           shape=[1, 1, 64, NUM_CLASSES],
                                            initializer=msra_initializer(1, 64),
                                            wd=0.0005)
       conv = tf.nn.conv2d(conv_decode1, kernel, [1, 1, 1, 1], padding='SAME')
-      biases = _variable_on_cpu('biases', [FLAGS.num_class+1], tf.constant_initializer(0.0)) #yike
+      biases = _variable_on_cpu('biases', [NUM_CLASSES], tf.constant_initializer(0.0))
       conv_classifier = tf.nn.bias_add(conv, biases, name=scope.name)
 
     logit = conv_classifier
-    loss = cal_loss(conv_classifier, labels,FLAGS)
+    loss = cal_loss(conv_classifier, labels)
 
     return loss, logit
 
@@ -315,7 +316,7 @@ def test(FLAGS):
     images, labels = get_all_test_data(image_filenames, label_filenames)
 
     threads = tf.train.start_queue_runners(sess=sess)
-    hist = np.zeros((FLAGS.num_class+1,FLAGS.num_class+1))#((NUM_CLASSES, NUM_CLASSES)) yike
+    hist = np.zeros((NUM_CLASSES, NUM_CLASSES))
     for image_batch, label_batch  in zip(images, labels):
 
       feed_dict = {
@@ -365,13 +366,11 @@ def training(FLAGS, is_finetune=False):
 
     # For CamVid
     images, labels = CamVidInputs(image_filenames, label_filenames, batch_size)
-    #print(labels)
-    #raise Exception('so far so good')
 
     val_images, val_labels = CamVidInputs(val_image_filenames, val_label_filenames, batch_size)
 
     # Build a Graph that computes the logits predictions from the inference model.
-    loss, eval_prediction = inference(train_data_node, train_labels_node, batch_size, phase_train,FLAGS)
+    loss, eval_prediction = inference(train_data_node, train_labels_node, batch_size, phase_train)
 
     # Build a Graph that trains the model with one batch of examples and updates the model parameters.
     train_op = train(loss, global_step)
@@ -435,7 +434,7 @@ def training(FLAGS, is_finetune=False):
         if step % 100 == 0:
           print("start validating.....")
           total_val_loss = 0.0
-          hist = np.zeros((FLAGS.num_class+1,FLAGS.num_class+1))#yike ((NUM_CLASSES, NUM_CLASSES))
+          hist = np.zeros((NUM_CLASSES, NUM_CLASSES))
           for test_step in range(int(TEST_ITER)):
             val_images_batch, val_labels_batch = sess.run([val_images, val_labels])
 
