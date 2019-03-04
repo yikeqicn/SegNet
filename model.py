@@ -20,7 +20,7 @@ MOVING_AVERAGE_DECAY = 0.9999     # The decay to use for the moving average.
 NUM_EPOCHS_PER_DECAY = 350.0      # Epochs after which learning rate decays.
 LEARNING_RATE_DECAY_FACTOR = 0.1  # Learning rate decay factor.
 
-INITIAL_LEARNING_RATE = 0.001      # Initial learning rate.
+INITIAL_LEARNING_RATE = FLAGS.learning_rate#0.001      # Initial learning rate. yike
 EVAL_BATCH_SIZE = FLAGS.batch_size
 BATCH_SIZE = FLAGS.batch_size
 # for CamVid
@@ -72,47 +72,61 @@ def loss(logits, labels):
 def weighted_loss(logits, labels, num_classes, head=None):
     """ median-frequency re-weighting """
     with tf.name_scope('loss'):
-
+        print('w_llll')
         logits = tf.reshape(logits, (-1, num_classes))
-
+        print(logits.get_shape())
         epsilon = tf.constant(value=1e-10)
 
         logits = logits + epsilon
 
         # consturct one-hot label array
         label_flat = tf.reshape(labels, (-1, 1))
+        print(label_flat.get_shape())
 
         # should be [batch ,num_classes]
         labels = tf.reshape(tf.one_hot(label_flat, depth=num_classes), (-1, num_classes))
+        print(labels.get_shape())
 
         softmax = tf.nn.softmax(logits)
+        print(softmax.get_shape())
+        print(epsilon.get_shape())
 
+        print((labels * tf.log(softmax + epsilon)).get_shape())
+        print(head.shape)
+        print(tf.multiply(labels * tf.log(softmax + epsilon), head))
+        
         cross_entropy = -tf.reduce_sum(tf.multiply(labels * tf.log(softmax + epsilon), head), axis=[1])
+        print(cross_entropy.get_shape())
 
         cross_entropy_mean = tf.reduce_mean(cross_entropy, name='cross_entropy')
-
+        print(cross_entropy_mean.get_shape())
         tf.add_to_collection('losses', cross_entropy_mean)
 
         loss = tf.add_n(tf.get_collection('losses'), name='total_loss')
+        print(loss)      
 
     return loss
 
-def cal_loss(logits, labels):
-    loss_weight = np.array([
-      0.2595,
-      0.1826,
-      4.5640,
-      0.1417,
-      0.9051,
-      0.3826,
-      9.6446,
-      1.8418,
-      0.6823,
-      6.2478,
-      7.3614,
-      1.0974]) # class 0~11
+def cal_loss(logits, labels): # yike: need to change
+#    loss_weight = np.array([
+#      0.2595,
+#      0.1826,
+#      4.5640,
+#      0.1417,
+#      0.9051,
+#      0.3826,
+#      9.6446,
+#      1.8418,
+#      0.6823,
+#      6.2478,
+#      7.3614,
+#      1.0974]) # class 0~11
+    loss_weight=np.array([0.4,0.6]) #yike
 
     labels = tf.cast(labels, tf.int32)
+    print('clll')
+    print(logits.get_shape())
+    print(labels.get_shape())
     # return loss(logits, labels)
     return weighted_loss(logits, labels, num_classes=NUM_CLASSES, head=loss_weight)
 
@@ -173,32 +187,54 @@ def batch_norm_layer(inputT, is_training, scope):
 
 
 def inference(images, labels, batch_size, phase_train):
+    print('GGG')
+    print(images.get_shape())
     # norm1
     norm1 = tf.nn.lrn(images, depth_radius=5, bias=1.0, alpha=0.0001, beta=0.75,
                 name='norm1')
+    print(norm1.get_shape())
     # conv1
-    conv1 = conv_layer_with_bn(norm1, [7, 7, images.get_shape().as_list()[3], 64], phase_train, name="conv1")
+    conv1 = conv_layer_with_bn(norm1, [7, 7, images.get_shape().as_list()[3], 64], phase_train, name="conv1") # yike: 7 too large? how about 3?
+    print(conv1.get_shape())
     # pool1
     pool1, pool1_indices = tf.nn.max_pool_with_argmax(conv1, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1],
                            padding='SAME', name='pool1')
+    print(pool1.get_shape())
+    print(pool1_indices.get_shape())
     # conv2
     conv2 = conv_layer_with_bn(pool1, [7, 7, 64, 64], phase_train, name="conv2")
+    
 
     # pool2
     pool2, pool2_indices = tf.nn.max_pool_with_argmax(conv2, ksize=[1, 2, 2, 1],
                            strides=[1, 2, 2, 1], padding='SAME', name='pool2')
+    print('22222')
+    print(pool2.get_shape())
+    print(pool2_indices.get_shape())
+
+
     # conv3
     conv3 = conv_layer_with_bn(pool2, [7, 7, 64, 64], phase_train, name="conv3")
 
     # pool3
     pool3, pool3_indices = tf.nn.max_pool_with_argmax(conv3, ksize=[1, 2, 2, 1],
                            strides=[1, 2, 2, 1], padding='SAME', name='pool3')
+
+    print('33333')
+    print(pool3.get_shape())
+    print(pool3_indices.get_shape())
+
+
+
     # conv4
     conv4 = conv_layer_with_bn(pool3, [7, 7, 64, 64], phase_train, name="conv4")
 
     # pool4
     pool4, pool4_indices = tf.nn.max_pool_with_argmax(conv4, ksize=[1, 2, 2, 1],
                            strides=[1, 2, 2, 1], padding='SAME', name='pool4')
+    print('44444')
+    print(pool4.get_shape())
+    print(pool4_indices.get_shape())
 
     """ End of encoder """
     """ start upsample """
@@ -223,9 +259,12 @@ def inference(images, labels, batch_size, phase_train):
 
     # upsample1
     # upsample1 = upsample_with_pool_indices(conv_decode2, pool1_indices, conv_decode2.get_shape(), scale=2, name='upsample1')
-    upsample1= deconv_layer(conv_decode2, [2, 2, 64, 64], [batch_size, 360, 480, 64], 2, "up1")
+    upsample1=deconv_layer(conv_decode2, [2, 2, 64, 64], [batch_size, IMAGE_HEIGHT, IMAGE_WIDTH, 64], 2, "up1") # yike !!!! deconv_layer(conv_decode2, [2, 2, 64, 64], [batch_size, 360, 480, 64], 2, "up1")
     # decode4
     conv_decode1 = conv_layer_with_bn(upsample1, [7, 7, 64, 64], phase_train, False, name="conv_decode1")
+    print('d111111')
+    print(conv_decode1.get_shape())
+    
     """ end of Decode """
     """ Start Classify """
     # output predicted class number (6)
@@ -235,25 +274,36 @@ def inference(images, labels, batch_size, phase_train):
                                            initializer=msra_initializer(1, 64),
                                            wd=0.0005)
       conv = tf.nn.conv2d(conv_decode1, kernel, [1, 1, 1, 1], padding='SAME')
+      print('cv')
+      print(conv.get_shape())
       biases = _variable_on_cpu('biases', [NUM_CLASSES], tf.constant_initializer(0.0))
+      print(biases.get_shape())
       conv_classifier = tf.nn.bias_add(conv, biases, name=scope.name)
-
+      print(conv_classifier.get_shape())
     logit = conv_classifier
+    print('LLL')
+    print(labels)
+    print(conv_classifier)
+    
     loss = cal_loss(conv_classifier, labels)
 
     return loss, logit
 
 def train(total_loss, global_step):
-    total_sample = 274
-    num_batches_per_epoch = 274/1
+    #total_sample = 274 yike: ok to comment out?
+    #num_batches_per_epoch = 274/1 yike: ok to comment out?
     """ fix lr """
+    print(total_loss)
     lr = INITIAL_LEARNING_RATE
     loss_averages_op = _add_loss_summaries(total_loss)
-
+    print(loss_averages_op)
+    print('11111')
     # Compute gradients.
     with tf.control_dependencies([loss_averages_op]):
+      print('try...')
       opt = tf.train.AdamOptimizer(lr)
       grads = opt.compute_gradients(total_loss)
+      print(grads)
     apply_gradient_op = opt.apply_gradients(grads, global_step=global_step)
 
     # Add histograms for trainable variables.
@@ -343,7 +393,7 @@ def training(FLAGS, is_finetune=False):
   batch_size = FLAGS.batch_size
   train_dir = FLAGS.log_dir # /tmp3/first350/TensorFlow/Logs
   image_dir = FLAGS.image_dir # /tmp3/first350/SegNet-Tutorial/CamVid/train.txt
-  val_dir = FLAGS.val_dir # /tmp3/first350/SegNet-Tutorial/CamVid/val.txt
+#  val_dir = FLAGS.val_dir # /tmp3/first350/SegNet-Tutorial/CamVid/val.txt
   finetune_ckpt = FLAGS.finetune
   image_w = FLAGS.image_w
   image_h = FLAGS.image_h
@@ -351,9 +401,9 @@ def training(FLAGS, is_finetune=False):
   # should be changed if your model stored by different convention
   startstep = 0 if not is_finetune else int(FLAGS.finetune.split('-')[-1])
 
-  image_filenames, label_filenames = get_filename_list(image_dir)
-  val_image_filenames, val_label_filenames = get_filename_list(val_dir)
-
+#  image_filenames, label_filenames = get_filename_list(image_dir)
+#  val_image_filenames, val_label_filenames = get_filename_list(val_dir)
+  image_filenames, label_filenames, val_image_filenames, val_label_filenames=get_filename_list_train_val(image_dir,train_per=0.9) #yike
   with tf.Graph().as_default():
 
     train_data_node = tf.placeholder( tf.float32, shape=[batch_size, image_h, image_w, image_c])
@@ -365,16 +415,24 @@ def training(FLAGS, is_finetune=False):
     global_step = tf.Variable(0, trainable=False)
 
     # For CamVid
-    images, labels = CamVidInputs(image_filenames, label_filenames, batch_size)
+    images, labels = ArtPrintVidInputs(image_filenames, label_filenames, batch_size)#yike CamVidInputs(image_filenames, label_filenames, batch_size)
+    print('aaa')
+    print(images.shape)
+    print(images[0])
 
-    val_images, val_labels = CamVidInputs(val_image_filenames, val_label_filenames, batch_size)
-
+    val_images, val_labels = ArtPrintVidInputs(val_image_filenames, val_label_filenames, batch_size)#yike CamVidInputs(val_image_filenames, val_label_filenames, batch_size)
+    print('ttt')
+    print(val_images.shape)
+    print(train_data_node)
+    print(train_labels_node)
     # Build a Graph that computes the logits predictions from the inference model.
     loss, eval_prediction = inference(train_data_node, train_labels_node, batch_size, phase_train)
-
+    print('le')
+    print(loss)
+    print(eval_prediction)
     # Build a Graph that trains the model with one batch of examples and updates the model parameters.
     train_op = train(loss, global_step)
-
+    print('ffffff')
     saver = tf.train.Saver(tf.global_variables())
 
     summary_op = tf.summary.merge_all()
@@ -404,6 +462,7 @@ def training(FLAGS, is_finetune=False):
 
       for step in range(startstep, startstep + max_steps):
         image_batch ,label_batch = sess.run([images, labels])
+        print(len(label_batch))
         # since we still use mini-batches in validation, still set bn-layer phase_train = True
         feed_dict = {
           train_data_node: image_batch,

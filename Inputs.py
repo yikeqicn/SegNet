@@ -1,6 +1,7 @@
 import tensorflow as tf
 from tensorflow.python.framework import ops
 from tensorflow.python.framework import dtypes
+from numpy.random import choice, normal, rand, randint
 import os, sys
 import numpy as np
 import math
@@ -14,9 +15,9 @@ IMAGE_WIDTH = FLAGS.image_w#480 yike
 IMAGE_DEPTH = FLAGS.image_c#3 yike
 
 NUM_CLASSES = FLAGS.num_class#11
-NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = 367
-NUM_EXAMPLES_PER_EPOCH_FOR_TEST = 101
-NUM_EXAMPLES_PER_EPOCH_FOR_EVAL = 1
+#NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = 367
+#NUM_EXAMPLES_PER_EPOCH_FOR_TEST = 101
+#NUM_EXAMPLES_PER_EPOCH_FOR_EVAL = 1
 
 def _generate_image_and_label_batch(image, label, min_queue_examples,
                                     batch_size, shuffle):
@@ -42,7 +43,7 @@ def _generate_image_and_label_batch(image, label, min_queue_examples,
         [image, label],
         batch_size=batch_size,
         num_threads=num_preprocess_threads,
-        capacity=min_queue_examples + 3 * batch_size,
+        capacity=min_queue_examples + 3 * batch_size, #3?
         min_after_dequeue=min_queue_examples)
   else:
     images, label_batch = tf.train.batch(
@@ -80,9 +81,18 @@ def CamVid_reader(filename_queue):
 
   imageValue = tf.read_file(image_filename)
   labelValue = tf.read_file(label_filename)
-
+  print('Value')
+  print(imageValue)
   image_bytes = tf.image.decode_png(imageValue)
   label_bytes = tf.image.decode_png(labelValue)
+
+#  image_bytes = tf.image.decode_png(imageValue,channels=3)
+#  label_bytes = tf.image.decode_png(labelValue,channels=1)
+
+
+  print('bytes')
+  print(image_bytes)
+  print(label_bytes)
 
   image = tf.reshape(image_bytes, (IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_DEPTH))
   label = tf.reshape(label_bytes, (IMAGE_HEIGHT, IMAGE_WIDTH, 1))
@@ -94,22 +104,30 @@ def get_filename_list(path):
   image_filenames = []
   label_filenames = []
   filenames = []
+#  gt_texts=[]
   for i in fd:
     i = i.strip().split(" ")
     image_filenames.append(i[0])
     label_filenames.append(i[1])
+#    gt_texts.append(i[2])
   return image_filenames, label_filenames
 
 def CamVidInputs(image_filenames, label_filenames, batch_size):
-
+  print(len(image_filenames))
+  print(image_filenames[0])
   images = ops.convert_to_tensor(image_filenames, dtype=dtypes.string)
   labels = ops.convert_to_tensor(label_filenames, dtype=dtypes.string)
+  print(images.shape)
+  print(images.shape)
+  print('lalalala')
 
   filename_queue = tf.train.slice_input_producer([images, labels], shuffle=True)
-
+  print(len(filename_queue))
+  print(filename_queue[1])
   image, label = CamVid_reader(filename_queue)
   reshaped_image = tf.cast(image, tf.float32)
-
+  print('check')
+  print(image.shape)
   min_fraction_of_examples_in_queue = 0.4
   min_queue_examples = int(NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN *
                            min_fraction_of_examples_in_queue)
@@ -133,3 +151,83 @@ def get_all_test_data(im_list, la_list):
     images.append(im)
     labels.append(la)
   return images, labels
+
+#==============Artifact Data 1==================================
+
+def ArtPrintVid_reader(filename_queue):
+
+  image_filename = filename_queue[0]
+  label_filename = filename_queue[1]
+
+  imageValue = tf.read_file(image_filename)
+  labelValue = tf.read_file(label_filename)
+  print('Value')
+  print(imageValue)
+  image_bytes = tf.image.decode_jpeg(imageValue)
+  label_bytes = tf.image.decode_jpeg(labelValue)
+
+#  image_bytes = tf.image.decode_png(imageValue,channels=3)
+#  label_bytes = tf.image.decode_png(labelValue,channels=1)
+  print('bytes')
+  print(image_bytes)
+  print(label_bytes)
+
+  image = tf.reshape(image_bytes, (IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_DEPTH))
+  label = tf.reshape(label_bytes, (IMAGE_HEIGHT, IMAGE_WIDTH, 1))
+  print(image)
+  print(label)
+  return image, label
+
+
+def get_filename_list_train_val(path,train_per=0.9): #yike
+  fd = open(path)
+  image_filenames_tr = []
+  label_filenames_tr = []
+  image_filenames_val=[]
+  label_filenames_val=[]
+  filenames = []
+#  gt_texts=[]
+  for i in fd:
+    i = i.strip().split(" ")
+    if rand() < train_per:
+      image_filenames_tr.append(i[0])
+      label_filenames_tr.append(i[1])
+    else:
+      image_filenames_val.append(i[0])
+      label_filenames_val.append(i[0])
+#    gt_texts.append(i[2])
+  return image_filenames_tr, label_filenames_tr, image_filenames_val, label_filenames_val
+
+
+def ArtPrintVidInputs(image_filenames, label_filenames, batch_size):
+  print(len(image_filenames))
+  print(image_filenames[0])
+  NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN=len(label_filenames) #yike
+  print('kkk')
+  print(NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN)
+  images = ops.convert_to_tensor(image_filenames, dtype=dtypes.string)
+  labels = ops.convert_to_tensor(label_filenames, dtype=dtypes.string)
+  print(images.shape)
+  print(images.shape)
+  print('lalalala')
+
+  filename_queue = tf.train.slice_input_producer([images, labels], shuffle=True)
+  print(len(filename_queue))
+  print(filename_queue[1])
+  image, label = ArtPrintVid_reader(filename_queue) #yike
+  reshaped_image = tf.cast(image, tf.float32)
+  print('check')
+  print(image.shape)
+  min_fraction_of_examples_in_queue = 0.4
+  min_queue_examples = int(NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN *
+                           min_fraction_of_examples_in_queue)
+  print ('Filling queue with %d CamVid images before starting to train. '
+         'This will take a few minutes.' % min_queue_examples)
+  
+
+  # Generate a batch of images and labels by building up a queue of examples.
+  return _generate_image_and_label_batch(reshaped_image, label,
+                                         min_queue_examples, batch_size,
+                                         shuffle=True)
+
+

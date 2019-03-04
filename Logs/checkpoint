@@ -1,2 +1,0 @@
-model_checkpoint_path: "/root/yq/SegNet/Logs/model.ckpt-0"
-all_model_checkpoint_paths: "/root/yq/SegNet/Logs/model.ckpt-0"
