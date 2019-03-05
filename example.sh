@@ -1,7 +1,9 @@
 #!/bin/bash
 
 # for training
-python main.py --batch_size=5
+python main.py --batch_size=10 --image_h=360 --image_w=480 --image_c=1 --image_dir=/root/datasets/artifact_images/databook.txt
+#--image_dir=/root/yq/SegNet/CamVid/train.txt   --image_h=360 --image_w=480 --image_c=1
+#--image_dir=/root/datasets/artifact_images/databook.txt 
 
 # for finetune from saved ckpt
 #python main.py --finetune=/root/yq/SegNet/logs/model.ckpt-0  --batch_size=5

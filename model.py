@@ -1,3 +1,5 @@
+from args import *
+
 import tensorflow as tf
 from tensorflow.python.framework import ops
 from tensorflow.python.framework import dtypes
@@ -12,8 +14,11 @@ from math import ceil
 from tensorflow.python.ops import gen_nn_ops
 # modules
 from Utils import _variable_with_weight_decay, _variable_on_cpu, _add_loss_summaries, _activation_summary, print_hist_summery, get_hist, per_class_acc, writeImage
+from datasets import ArtPrint
+from torch.utils.data import DataLoader, ConcatDataset, random_split#, SequentialSampler #yike: add SequentialSampler
+from os.path import join, basename, dirname
 from Inputs import *
-from args import *
+
 
 # Constants describing the training process.
 MOVING_AVERAGE_DECAY = 0.9999     # The decay to use for the moving average.
@@ -33,6 +38,10 @@ NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = 367
 NUM_EXAMPLES_PER_EPOCH_FOR_TEST = 101
 NUM_EXAMPLES_PER_EPOCH_FOR_EVAL = 1
 TEST_ITER = NUM_EXAMPLES_PER_EPOCH_FOR_TEST / BATCH_SIZE
+
+
+
+
 
 def msra_initializer(kl, dl):
     """
@@ -72,38 +81,38 @@ def loss(logits, labels):
 def weighted_loss(logits, labels, num_classes, head=None):
     """ median-frequency re-weighting """
     with tf.name_scope('loss'):
-        print('w_llll')
+        #print('w_llll')
         logits = tf.reshape(logits, (-1, num_classes))
-        print(logits.get_shape())
+        #print(logits.get_shape())
         epsilon = tf.constant(value=1e-10)
 
         logits = logits + epsilon
 
         # consturct one-hot label array
         label_flat = tf.reshape(labels, (-1, 1))
-        print(label_flat.get_shape())
+#        print(label_flat.get_shape())
 
         # should be [batch ,num_classes]
         labels = tf.reshape(tf.one_hot(label_flat, depth=num_classes), (-1, num_classes))
-        print(labels.get_shape())
+#        print(labels.get_shape())
 
         softmax = tf.nn.softmax(logits)
-        print(softmax.get_shape())
-        print(epsilon.get_shape())
+#        print(softmax.get_shape())
+#        print(epsilon.get_shape())
 
-        print((labels * tf.log(softmax + epsilon)).get_shape())
-        print(head.shape)
-        print(tf.multiply(labels * tf.log(softmax + epsilon), head))
+#        print((labels * tf.log(softmax + epsilon)).get_shape())
+#        print(head.shape)
+#        print(tf.multiply(labels * tf.log(softmax + epsilon), head))
         
         cross_entropy = -tf.reduce_sum(tf.multiply(labels * tf.log(softmax + epsilon), head), axis=[1])
-        print(cross_entropy.get_shape())
+#        print(cross_entropy.get_shape())
 
         cross_entropy_mean = tf.reduce_mean(cross_entropy, name='cross_entropy')
-        print(cross_entropy_mean.get_shape())
+#        print(cross_entropy_mean.get_shape())
         tf.add_to_collection('losses', cross_entropy_mean)
 
         loss = tf.add_n(tf.get_collection('losses'), name='total_loss')
-        print(loss)      
+#        print(loss)      
 
     return loss
 
@@ -300,10 +309,10 @@ def train(total_loss, global_step):
     print('11111')
     # Compute gradients.
     with tf.control_dependencies([loss_averages_op]):
-      print('try...')
+      #print('try...')
       opt = tf.train.AdamOptimizer(lr)
       grads = opt.compute_gradients(total_loss)
-      print(grads)
+      #print(grads)
     apply_gradient_op = opt.apply_gradients(grads, global_step=global_step)
 
     # Add histograms for trainable variables.
@@ -388,58 +397,68 @@ def test(FLAGS):
     print("acc: ", acc_total)
     print("mean IU: ", np.nanmean(iu))
 
-def training(FLAGS, is_finetune=False):
+def training(FLAGS, loader=None,validateloader=None,testloader=None, is_finetune=False):
   max_steps = FLAGS.max_steps
   batch_size = FLAGS.batch_size
   train_dir = FLAGS.log_dir # /tmp3/first350/TensorFlow/Logs
   image_dir = FLAGS.image_dir # /tmp3/first350/SegNet-Tutorial/CamVid/train.txt
-#  val_dir = FLAGS.val_dir # /tmp3/first350/SegNet-Tutorial/CamVid/val.txt
+  val_dir = FLAGS.val_dir # /tmp3/first350/SegNet-Tutorial/CamVid/val.txt
   finetune_ckpt = FLAGS.finetune
   image_w = FLAGS.image_w
   image_h = FLAGS.image_h
   image_c = FLAGS.image_c
   # should be changed if your model stored by different convention
   startstep = 0 if not is_finetune else int(FLAGS.finetune.split('-')[-1])
-
+######################################################################
 #  image_filenames, label_filenames = get_filename_list(image_dir)
 #  val_image_filenames, val_label_filenames = get_filename_list(val_dir)
-  image_filenames, label_filenames, val_image_filenames, val_label_filenames=get_filename_list_train_val(image_dir,train_per=0.9) #yike
+#  image_filenames, label_filenames, val_image_filenames, val_label_filenames=get_filename_list_train_val(image_dir,train_per=0.9) #yike
+#  print('img_fnames')
+#  print(type(image_filenames))
+  #print(len(image_filenames))
+  #print(image_filenames[10])
+  print(len(validateloader))
+  print('+++')
   with tf.Graph().as_default():
 
-    train_data_node = tf.placeholder( tf.float32, shape=[batch_size, image_h, image_w, image_c])
+    train_data_node = tf.placeholder( tf.float32, shape=[None, image_h, image_w, image_c]) #batch_size
 
-    train_labels_node = tf.placeholder(tf.int64, shape=[batch_size, image_h, image_w, 1])
+    train_labels_node = tf.placeholder(tf.int64, shape=[None, image_h, image_w, 1]) #batch_size
 
     phase_train = tf.placeholder(tf.bool, name='phase_train')
 
     global_step = tf.Variable(0, trainable=False)
 
     # For CamVid
-    images, labels = ArtPrintVidInputs(image_filenames, label_filenames, batch_size)#yike CamVidInputs(image_filenames, label_filenames, batch_size)
-    print('aaa')
-    print(images.shape)
-    print(images[0])
+########################################################
+    #images, labels = ArtPrintVidInputs(image_filenames, label_filenames, batch_size)
+    # REPLACE WITH DATALOADER images,labels=CamVidInputs(image_filenames, label_filenames, batch_size)
 
-    val_images, val_labels = ArtPrintVidInputs(val_image_filenames, val_label_filenames, batch_size)#yike CamVidInputs(val_image_filenames, val_label_filenames, batch_size)
-    print('ttt')
-    print(val_images.shape)
-    print(train_data_node)
-    print(train_labels_node)
+#    print('aaa')
+#    print(images.shape)
+#    print(images[0])
+#########################################################
+    #val_images, val_labels = ArtPrintVidInputs(val_image_filenames, val_label_filenames, batch_size)
+    # REPLACE WITH DATALOADER val_images, val_labels=CamVidInputs(val_image_filenames, val_label_filenames, batch_size)
+#    print('ttt')
+#    print(val_images.shape)
+#    print(train_data_node)
+#    print(train_labels_node)
     # Build a Graph that computes the logits predictions from the inference model.
     loss, eval_prediction = inference(train_data_node, train_labels_node, batch_size, phase_train)
-    print('le')
-    print(loss)
-    print(eval_prediction)
+#    print('le')
+#    print(loss)
+#    print(eval_prediction)
     # Build a Graph that trains the model with one batch of examples and updates the model parameters.
     train_op = train(loss, global_step)
-    print('ffffff')
+#    print('ffffff')
     saver = tf.train.Saver(tf.global_variables())
 
-    summary_op = tf.summary.merge_all()
+#    summary_op = tf.summary.merge_all()
 
     # gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.0001)
 
-    with tf.Session() as sess:
+    with tf.Session(config=tf.ConfigProto(allow_soft_placement=True, gpu_options=tf.GPUOptions(allow_growth=True))) as sess:
       # Build an initialization operation to run below.
       if (is_finetune == True):
           saver.restore(sess, finetune_ckpt )
@@ -447,81 +466,148 @@ def training(FLAGS, is_finetune=False):
           init = tf.global_variables_initializer()
           sess.run(init)
 
+#NOT NEEDED SINCE WE ARE USING DATALOADER
       # Start the queue runners.
-      coord = tf.train.Coordinator()
-      threads = tf.train.start_queue_runners(sess=sess, coord=coord)
+#      coord = tf.train.Coordinator()
+#      threads = tf.train.start_queue_runners(sess=sess, coord=coord)
 
+#NOT NEEDED SINCE WE USE COMET TO LOG OUR RESULTS
       # Summery placeholders
-      summary_writer = tf.summary.FileWriter(train_dir, sess.graph)
-      average_pl = tf.placeholder(tf.float32)
-      acc_pl = tf.placeholder(tf.float32)
-      iu_pl = tf.placeholder(tf.float32)
-      average_summary = tf.summary.scalar("test_average_loss", average_pl)
-      acc_summary = tf.summary.scalar("test_accuracy", acc_pl)
-      iu_summary = tf.summary.scalar("Mean_IU", iu_pl)
+#      summary_writer = tf.summary.FileWriter(train_dir, sess.graph)
+#      average_pl = tf.placeholder(tf.float32)
+#      acc_pl = tf.placeholder(tf.float32)
+#      iu_pl = tf.placeholder(tf.float32)
+#      average_summary = tf.summary.scalar("test_average_loss", average_pl)
+#      acc_summary = tf.summary.scalar("test_accuracy", acc_pl)
+#      iu_summary = tf.summary.scalar("Mean_IU", iu_pl)
 
-      for step in range(startstep, startstep + max_steps):
-        image_batch ,label_batch = sess.run([images, labels])
-        print(len(label_batch))
-        # since we still use mini-batches in validation, still set bn-layer phase_train = True
-        feed_dict = {
-          train_data_node: image_batch,
-          train_labels_node: label_batch,
-          phase_train: True
-        }
-        start_time = time.time()
+      # for step in range(startstep, startstep + max_steps):
+      epoch = 0  # number of training epochs since start
+      bestAcc = float('-inf')  # best valdiation accuracy rate
+      while True:
+        epoch+=1
+        for _step, (image_batch, label_batch) in enumerate(loader):
+          step=startstep+_step
+          #print('have a try')
+          # GET RID OF THIS!!!!!!!!!!!!!!!!!1 image_batch ,label_batch = sess.run([images, labels])
+          # print('have a try')
+          image_batch=image_batch.numpy()
+          label_batch=label_batch.numpy()
+          #print(label_batch.get_shape())
+          # since we still use mini-batches in validation, still set bn-layer phase_train = True
+          #image_batch, label_batch = YIKEDATALOADER.__next__()
+          feed_dict = {
+            train_data_node: image_batch,
+            train_labels_node: label_batch,
+            phase_train: True
+          }
+          start_time = time.time()
+          _, loss_value = sess.run([train_op, loss], feed_dict=feed_dict)
+          duration = time.time() - start_time
 
-        _, loss_value = sess.run([train_op, loss], feed_dict=feed_dict)
-        duration = time.time() - start_time
+          assert not np.isnan(loss_value), 'Model diverged with loss = NaN'
 
-        assert not np.isnan(loss_value), 'Model diverged with loss = NaN'
+          if step % 10 == 0:
+            num_examples_per_step = batch_size
+            examples_per_sec = num_examples_per_step / duration
+            sec_per_batch = float(duration)
 
-        if step % 10 == 0:
-          num_examples_per_step = batch_size
-          examples_per_sec = num_examples_per_step / duration
-          sec_per_batch = float(duration)
-
-          format_str = ('%s: step %d, loss = %.2f (%.1f examples/sec; %.3f '
-                      'sec/batch)')
-          print (format_str % (datetime.now(), step, loss_value,
+            format_str = ('%s: step %d, loss = %.2f (%.1f examples/sec; %.3f '
+                    'sec/batch)')
+            print (format_str % (datetime.now(), step, loss_value,
                                examples_per_sec, sec_per_batch))
 
           # eval current training batch pre-class accuracy
-          pred = sess.run(eval_prediction, feed_dict=feed_dict)
-          per_class_acc(pred, label_batch)
+            pred = sess.run(eval_prediction, feed_dict=feed_dict)
+            print(pred.shape)
+            print('~~~')
+            #print(sum(pred>0.5))
+            #print(sum(pred>0.5)/sum(pred>-10000))
+            per_class_acc(pred, label_batch)
 
-        if step % 100 == 0:
-          print("start validating.....")
-          total_val_loss = 0.0
-          hist = np.zeros((NUM_CLASSES, NUM_CLASSES))
-          for test_step in range(int(TEST_ITER)):
-            val_images_batch, val_labels_batch = sess.run([val_images, val_labels])
+          if _step % 500 == 0 or _step+1==len(image_batch):
+            print("start validating.....")
+            total_val_loss = 0.0
+            hist = np.zeros((NUM_CLASSES, NUM_CLASSES))
+#            for test_step in range(int(TEST_ITER)):
+            print(len(validateloader))
+            for test_step, (val_images_batch,  val_labels_batch) in enumerate(validateloader):# val_labels_batch = sess.run([val_images, val_labels])
+              val_images_batch=val_images_batch.numpy()
+              val_labels_batch=val_labels_batch.numpy()
+              _val_loss, _val_pred = sess.run([loss, eval_prediction], feed_dict={
+                train_data_node: val_images_batch,
+                train_labels_node: val_labels_batch,
+                phase_train: True
+              })
+              total_val_loss += _val_loss
+              hist += get_hist(_val_pred, val_labels_batch)
+            
+            val_loss=total_val_loss / len(validateloader)*batch_size
+            acc_total = np.diag(hist).sum() / hist.sum()
+            print('validation/total accuracy: '+str(acc_total))
+            acc_class_total=[]
+            time_anchor=(_step+FLAGS.max_epoch*(epoch-1))/(FLAGS.max_epoch*len(loader))
+            for ii in range(NUM_CLASSES):
+              if float(hist.sum(1)[ii]) == 0:
+                acc = 0.0
+              else:
+                acc = np.diag(hist)[ii] / float(hist.sum(1)[ii])
+              acc_class_total.append(acc)
+              
+              experiment.log_metric('validation/loss', val_loss, time_anchor)
+            #print("    class # %d accuracy = %f "%(ii,acc))
+            iu = np.diag(hist) / (hist.sum(1) + hist.sum(0) - np.diag(hist))
+            mean_iu=np.nanmean(iu)
+            
+            print('percentage: ' + str(time_anchor))
+            print('validation/loss: '+str(val_loss))
+            print('validation/total accuracy: '+str(acc_total))
+            print('validation/class_0 accuracy: '+str(acc_class_total[0]))
+            print('validation/class_1 accuracy: '+str(acc_class_total[1]))
+            
+            experiment.log_metric('validation/loss', val_loss, time_anchor)
+            experiment.log_metric('validation/total accuracy', acc_total, time_anchor)
+            experiment.log_metric('validation/class_0 accuracy',acc_class_total[0], time_anchor)
+            experiment.log_metric('validation/class_1 accuracy',acc_class_total[1], time_anchor)
 
-            _val_loss, _val_pred = sess.run([loss, eval_prediction], feed_dict={
-              train_data_node: val_images_batch,
-              train_labels_node: val_labels_batch,
-              phase_train: True
-            })
-            total_val_loss += _val_loss
-            hist += get_hist(_val_pred, val_labels_batch)
-          print("val loss: ", total_val_loss / TEST_ITER)
-          acc_total = np.diag(hist).sum() / hist.sum()
-          iu = np.diag(hist) / (hist.sum(1) + hist.sum(0) - np.diag(hist))
-          test_summary_str = sess.run(average_summary, feed_dict={average_pl: total_val_loss / TEST_ITER})
-          acc_summary_str = sess.run(acc_summary, feed_dict={acc_pl: acc_total})
-          iu_summary_str = sess.run(iu_summary, feed_dict={iu_pl: np.nanmean(iu)})
-          print_hist_summery(hist)
-          print(" end validating.... ")
+        if acc_total>bestAcc:
+          print('Total accuracy rate improved')
+          checkpoint_path=os.path.join(train_dir+'/'+FLAGS.name+'/'+'model.ckpt')
+          saver.save(sess,checkpoint_path,global_step=epoch) 
+          bestAcc=acc_total
+          noImprovementSince=0
+          open(checkpoint_path.replace('model.ckpt','accuracy.txt'), 'w').write(
+        'Validation total class accuracy rate of saved model: %f%%' % (bestAcc * 100.0))
+          experiment.log_metric('best/total accuracy', acc_total, time_anchor)
+          experiment.log_metric('best/class 0 accuracy', acc_class_total[0], time_anchor)
+          experiment.log_metric('best/class 1 accuracy', acc_class_total[1], time_anchor)
+        else:
+          print('Total accuracy rate not improved')
+          noImprovementSince+1
+        
+        if epoch>=FLAGS.max_epoch: print('Done with training at epoch', epoch, 'sigoptObservation='+str(bestAcc)); break
+'''        
+      for im_show_batch, label_show_batch in validateloader:
+        feed_dict = {
+            train_data_node: image_show_batch,
+            train_labels_node: label_show_batch,
+            phase_train: True
+          }
+        pred = sess.run(eval_prediction, feed_dict=feed_dict)
+        result=pred.argmax(3)
+        for idx in range(batch_size):
+          colored=cv2.cvtColor(np.squeeze(np.image_show_batch[idx]),cv2.COLOR_GRAY2BGR)
+          break
+'''
+#            test_summary_str = sess.run(average_summary, feed_dict={average_pl: total_val_loss / TEST_ITER})
+#            acc_summary_str = sess.run(acc_summary, feed_dict={acc_pl: acc_total})
+#            iu_summary_str = sess.run(iu_summary, feed_dict={iu_pl: np.nanmean(iu)})
+#            print_hist_summery(hist)
+#            print(" end validating.... ")
 
-          summary_str = sess.run(summary_op, feed_dict=feed_dict)
-          summary_writer.add_summary(summary_str, step)
-          summary_writer.add_summary(test_summary_str, step)
-          summary_writer.add_summary(acc_summary_str, step)
-          summary_writer.add_summary(iu_summary_str, step)
-        # Save the model checkpoint periodically.
-        if step % 1000 == 0 or (step + 1) == max_steps:
-          checkpoint_path = os.path.join(train_dir, 'model.ckpt')
-          saver.save(sess, checkpoint_path, global_step=step)
-
-      coord.request_stop()
-      coord.join(threads)
+#            summary_str = sess.run(summary_op, feed_dict=feed_dict)
+#            summary_writer.add_summary(summary_str, step)
+#            summary_writer.add_summary(test_summary_str, step)
+#            summary_writer.add_summary(acc_summary_str, step)
+#            summary_writer.add_summary(iu_summary_str, step)
+      #     Save the model checkpoint periodically.

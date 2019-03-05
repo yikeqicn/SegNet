@@ -113,6 +113,8 @@ def get_filename_list(path):
   return image_filenames, label_filenames
 
 def CamVidInputs(image_filenames, label_filenames, batch_size):
+  NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = 300#67
+  print('kvkd')
   print(len(image_filenames))
   print(image_filenames[0])
   images = ops.convert_to_tensor(image_filenames, dtype=dtypes.string)
@@ -185,7 +187,7 @@ def get_filename_list_train_val(path,train_per=0.9): #yike
   label_filenames_tr = []
   image_filenames_val=[]
   label_filenames_val=[]
-  filenames = []
+#  filenames = []
 #  gt_texts=[]
   for i in fd:
     i = i.strip().split(" ")
@@ -194,7 +196,7 @@ def get_filename_list_train_val(path,train_per=0.9): #yike
       label_filenames_tr.append(i[1])
     else:
       image_filenames_val.append(i[0])
-      label_filenames_val.append(i[0])
+      label_filenames_val.append(i[1])
 #    gt_texts.append(i[2])
   return image_filenames_tr, label_filenames_tr, image_filenames_val, label_filenames_val
 
@@ -204,6 +206,7 @@ def ArtPrintVidInputs(image_filenames, label_filenames, batch_size):
   print(image_filenames[0])
   NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN=len(label_filenames) #yike
   print('kkk')
+  print(len(label_filenames))
   print(NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN)
   images = ops.convert_to_tensor(image_filenames, dtype=dtypes.string)
   labels = ops.convert_to_tensor(label_filenames, dtype=dtypes.string)

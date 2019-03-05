@@ -116,7 +116,7 @@ def merge_patch_horiz_random(img, centroid_std=.05):
   
 if __name__=='__main__':
   orig_img_dir='/root/datasets/img_print_single/'
-  targ_dir='/root/datasets/artifact_images/'  
+  targ_dir='/root/datasets/artifact_images_1/'  
 #  img_path=orig_img_dir+"'Til Death Do Us Part Car/Part.jpg"# later use glob
 #  img=cv2.imread(img_path,0)  
 #  img=cv2.resize(img, (128,32), interpolation=cv2.INTER_CUBIC)
@@ -135,7 +135,7 @@ if __name__=='__main__':
       img=cv2.resize(img, (128,32), interpolation=cv2.INTER_CUBIC)
       nlst=path.replace(' ','_').split('/')
       gt=nlst[-1].split('.')[0]
-      new_name='#^#'.join(nlst[-2:]) #use '#^#' as '/'
+      new_name='___'.join(nlst[-2:]) #use '#^#' as '/'
       #print(new_name)
 
       if rand() < .70:
