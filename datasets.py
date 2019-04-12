@@ -1,16 +1,15 @@
 import random
 import numpy as np
 import cv2
-#from SamplePreprocessor import preprocess
 from glob import glob
 
 import gzip
 import pickle
 import torch.utils.data as data
 import os
-#from utils import maybe_download
 from os.path import join, basename, dirname, exists
-from args import *
+from utils import maybe_download
+#from args import *
 home = os.environ['HOME']
 
 class ArtPrint(data.Dataset):
@@ -19,11 +18,11 @@ class ArtPrint(data.Dataset):
   def __init__(self, root='/root/datasets', transform=None):
 
     self.transform=transform
-    self.root = join(root,'artifact_images')
+    self.root = join(root,'artifact_images','artifact_images') #zip problem, sorry
 
     # download and put dataset in correct directory
-    #maybe_download('https://www.dropbox.com/sh/tdd0784neuv9ysh/AABm3gxtjQIZ2R9WZ-XR9Kpra?dl=0',
-    #               'iam_handwriting', root, 'folder')
+    maybe_download('https://www.dropbox.com/s/gyod1hqau4a9lnj/artifact_images.zip?dl=0',
+                   'artifact_images', root, 'folder')
     #if exists(join(self.root,'words.tgz')):
     #  if not exists(join(self.root, 'words')):
     #    os.makedirs(join(self.root, 'words'))
@@ -35,9 +34,9 @@ class ArtPrint(data.Dataset):
     labelsFile = open(join(self.root,'databook.txt'))
     #chars = set()
     self.samples = []
-    ct=0
+    #ct=0
     for line in labelsFile:
-      ct+=1
+      #ct+=1
       # ignore comment line
       if not line or line[0] == '#':
         continue
@@ -46,9 +45,9 @@ class ArtPrint(data.Dataset):
       assert len(lineSplit) ==3
 
       #fileNameSplit = lineSplit[0].split('-')
-      imgPath = lineSplit[0]
+      imgPath = lineSplit[0].replace('/root/datasets/artifact_images',self.root)
       # GT text are columns starting at 9
-      labelPath = lineSplit[1]
+      labelPath = lineSplit[1].replace('/root/datasets/artifact_images',self.root)
       
       gt_text=lineSplit[2]
 
@@ -62,8 +61,8 @@ class ArtPrint(data.Dataset):
       # makes list of characters
       #      chars = chars.union(set(list(label)))
     #self.charList = sorted(list(chars))
-      if ct>=10000:
-        break
+      #if ct>=1000:
+      #  break
   def __str__(self):
     return 'Artifact word image dataset. Data location: '+self.root+', Length: '+str(len(self.samples))
 
