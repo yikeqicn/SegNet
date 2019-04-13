@@ -66,7 +66,7 @@ def merge_patch(imBase, imPatch, centroid, threshold=100):
   imBaseCrop = imBaseCrop[rr[keep], cc[keep]]
   imMerge[rr[keep], cc[keep]] = np.maximum(imBaseCrop, imPatchKeep)
   imLabel=np.zeros(imMerge.shape)
-  imLabel[rr[keep], cc[keep]] = np.int64(imPatchKeep>100)
+  imLabel[rr[keep], cc[keep]] = np.int64(imPatchKeep>100) * np.int64(imBaseCrop<50) # yike: exclude mark area from Base 04/12/2019, threshold 50
   #print(rr[keep])
   #print(rr[keep].shape)
   #print(cc[keep])
@@ -116,7 +116,7 @@ def merge_patch_horiz_random(img, centroid_std=.05):
   
 if __name__=='__main__':
   orig_img_dir='/root/datasets/img_print_single/'
-  targ_dir='/root/datasets/artifact_images_1/'  
+  targ_dir='/root/datasets/artifact_images_no_intersect/' # intersect won't be labeled as positive  04/12/2019
 #  img_path=orig_img_dir+"'Til Death Do Us Part Car/Part.jpg"# later use glob
 #  img=cv2.imread(img_path,0)  
 #  img=cv2.resize(img, (128,32), interpolation=cv2.INTER_CUBIC)
@@ -125,6 +125,12 @@ if __name__=='__main__':
   #print(img.shape) 
 #  cv2.imwrite(targ_dir+'test.jpg',img)
 #  cv2.imwrite(targ_dir+'tlabel.jpg',255-imLabel)
+  if not os.path.exists(targ_dir):
+    os.mkdir(targ_dir)
+  if not os.path.exists(targ_dir+'images'):
+    os.mkdir(targ_dir+'images')
+  if not os.path.exists(targ_dir+'labels'):
+    os.mkdir(targ_dir+'labels')
   orig_paths=glob(orig_img_dir+'**/**.jpg')
   with open(targ_dir+'databook.txt','w') as f:
     ct=0
