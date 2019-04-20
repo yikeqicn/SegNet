@@ -276,32 +276,48 @@ class Model:
        # upsample4 = upsample_with_pool_indices(pool4, pool4_indices, pool4.get_shape(), out_w=45, out_h=60, scale=2, name='upsample4')
        pool3_shape=pool3.get_shape()
        upsample4 = deconv_layer(pool4, [2, 2, 64, 64], tf.stack([batchsize, pool3_shape[1],pool3_shape[2], 64]), 2, "up4") #45, 60,
-       #print(tf.stack([batchsize, 45, 60, 64]))
+       #concat 4 yike
+       #combined4=tf.concat(axis=3,values=(upsample4,pool3))  
+       combined4=tf.concat(axis=3,values=(upsample4,conv4))  
+
+        #print(tf.stack([batchsize, 45, 60, 64]))
        # decode 4
-       conv_decode4 = conv_layer_with_bn(upsample4, [7, 7, 64, 64], phase_train, False, name="conv_decode4")
+       conv_decode4 = conv_layer_with_bn(combined4, [7, 7, 128, 64], phase_train, False, name="conv_decode4")
        print('d4444444')
        print(conv_decode4.get_shape())
        # upsample 3
        # upsample3 = upsample_with_pool_indices(conv_decode4, pool3_indices, conv_decode4.get_shape(), scale=2, name='upsample3')
        pool2_shape=pool2.get_shape()
        upsample3= deconv_layer(conv_decode4, [2, 2, 64, 64], tf.stack([batchsize, pool2_shape[1],pool2_shape[2], 64]), 2, "up3") #90, 120
-       # decode 3
-       conv_decode3 = conv_layer_with_bn(upsample3, [7, 7, 64, 64], phase_train, False, name="conv_decode3")
+       #concat 3 yike
+#       combined3=tf.concat(axis=3,values=(upsample3,pool2))  
+       combined3=tf.concat(axis=3,values=(upsample3,conv3))  
+
+        # decode 3
+       conv_decode3 = conv_layer_with_bn(combined3, [7, 7, 128, 64], phase_train, False, name="conv_decode3")
        print('d333333')
        print(conv_decode3.get_shape())
        # upsample2
        # upsample2 = upsample_with_pool_indices(conv_decode3, pool2_indices, conv_decode3.get_shape(), scale=2, name='upsample2')
        pool1_shape=pool1.get_shape()
        upsample2= deconv_layer(conv_decode3, [2, 2, 64, 64], tf.stack([batchsize, pool1_shape[1],pool1_shape[2], 64]), 2, "up2") #180, 240
+       #concat 2 yike
+       #combined2=tf.concat(axis=3,values=(upsample2,pool1))   
+       combined2=tf.concat(axis=3,values=(upsample2,conv2))   
        # decode 2
-       conv_decode2 = conv_layer_with_bn(upsample2, [7, 7, 64, 64], phase_train, False, name="conv_decode2")
+       conv_decode2 = conv_layer_with_bn(combined2, [7, 7, 128, 64], phase_train, False, name="conv_decode2")
        print('d22222')
        print(conv_decode2.get_shape()) 
        # upsample1
        # upsample1 = upsample_with_pool_indices(conv_decode2, pool1_indices, conv_decode2.get_shape(), scale=2, name='upsample1')
        upsample1=deconv_layer(conv_decode2, [2, 2, 64, 64], tf.stack([batchsize,self.args.image_h,self.args.image_w , 64]), 2, "up1") # IMAGE_HEIGHT, IMAGE_WIDTH yike !!!! deconv_layer(conv_decode2, [2, 2, 64, 64], [batch_size, 360, 480, 64], 2, "up1")
+    
+       #concat 1 yike
+       #combined2=tf.concat(axis=3,values=(upsample2,pool1))   
+       combined1=tf.concat(axis=3,values=(upsample1,conv1))   
+
        # decode4
-       conv_decode1 = conv_layer_with_bn(upsample1, [7, 7, 64, 64], phase_train, False, name="conv_decode1")
+       conv_decode1 = conv_layer_with_bn(combined1, [7, 7, 128, 64], phase_train, False, name="conv_decode1")
        print('d111111')
        print(conv_decode1.get_shape())
     

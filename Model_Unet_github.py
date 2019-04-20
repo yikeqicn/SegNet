@@ -1,6 +1,6 @@
+from __future__ import print_function, division, absolute_import, unicode_literals
 import tensorflow as tf
-from tensorflow.python.framework import ops
-from tensorflow.python.framework import dtypes
+
 import cv2
 
 import os, sys
@@ -10,92 +10,223 @@ from datetime import datetime
 import time
 from PIL import Image
 from math import ceil
+from collections import OrderedDict
+import logging
+'''
+from tensorflow.python.framework import ops
+from tensorflow.python.framework import dtypes
 from tensorflow.python.ops import gen_nn_ops
+'''
 # modules
-from utils import log_images,_variable_with_weight_decay, _variable_on_cpu, _add_loss_summaries, _activation_summary, print_hist_summery, get_hist, per_class_acc, writeImage
-from datasets import ArtPrint
+
+from utils import get_image_summary,log_images,_variable_with_weight_decay, _variable_on_cpu, _add_loss_summaries, _activation_summary, print_hist_summery, get_hist, per_class_acc, writeImage
+
+#from datasets import ArtPrint
 from torch.utils.data import DataLoader, ConcatDataset, random_split#, SequentialSampler #yike: add SequentialSampler
 from os.path import join, basename, dirname
 #from Inputs import *
 
-### initializers###
-def msra_initializer(kl, dl):
+# model layers
+def weight_variable(shape, stddev=0.1, name="weight"):
+    shape=np.array(shape)
+    #print(shape)
+    #print(stddev)
+    initial = tf.truncated_normal(shape, stddev=stddev)
+    return tf.Variable(initial, name=name)
+
+def weight_variable_devonc(shape, stddev=0.1, name="weight_devonc"):
+    shape=np.array(shape)
+    return tf.Variable(tf.truncated_normal(shape, stddev=stddev), name=name)
+
+def bias_variable(shape, name="bias"):
+    initial = tf.constant(0.1, shape=shape)
+    return tf.Variable(initial, name=name)
+
+def conv2d(x, W, b, keep_prob_):
+    with tf.name_scope("conv2d"):
+        conv_2d = tf.nn.conv2d(x, W, strides=[1, 1, 1, 1], padding='SAME')#'VALID'
+        conv_2d_b = tf.nn.bias_add(conv_2d, b)
+        return tf.nn.dropout(conv_2d_b, keep_prob_)
+
+def deconv2d(x, W,stride):
+    with tf.name_scope("deconv2d"):
+        x_shape = tf.shape(x)
+        output_shape = tf.stack([x_shape[0], x_shape[1]*2, x_shape[2]*2, x_shape[3]//2])
+        return tf.nn.conv2d_transpose(x, W, output_shape, strides=[1, stride, stride, 1], padding='SAME', name="conv2d_transpose") #'VALID'
+
+def max_pool(x,n):
+    return tf.nn.max_pool(x, ksize=[1, n, n, 1], strides=[1, n, n, 1], padding='SAME') #'VALID'
+
+def crop_and_concat(x1,x2):
+    with tf.name_scope("crop_and_concat"):
+        x1_shape = tf.shape(x1)
+        x2_shape = tf.shape(x2)
+        # offsets for the top left corner of the crop
+        offsets = [0, (x1_shape[1] - x2_shape[1]) // 2, (x1_shape[2] - x2_shape[2]) // 2, 0]
+        size = [-1, x2_shape[1], x2_shape[2], -1]
+        x1_crop = tf.slice(x1, offsets, size)
+        return tf.concat([x1_crop, x2], 3)
+
+def pixel_wise_softmax(output_map):
+    with tf.name_scope("pixel_wise_softmax"):
+        max_axis = tf.reduce_max(output_map, axis=3, keepdims=True)
+        exponential_map = tf.exp(output_map - max_axis)
+        normalize = tf.reduce_sum(exponential_map, axis=3, keepdims=True)
+        return exponential_map / normalize
+
+def cross_entropy(y_,output_map):
+    return -tf.reduce_mean(y_*tf.log(tf.clip_by_value(output_map,1e-10,1.0)), name="cross_entropy")
+
+#unet setting
+def create_conv_net(x, keep_prob, channels, n_class, layers=3, features_root=16, filter_size=3, pool_size=2,
+                    summaries=True):
     """
-    kl for kernel size, dl for filter number
+    Creates a new convolutional unet for the given parametrization.
+    :param x: input tensor, shape [?,nx,ny,channels]
+    :param keep_prob: dropout probability tensor
+    :param channels: number of channels in the input image
+    :param n_class: number of output labels
+    :param layers: number of layers in the net
+    :param features_root: number of features in the first layer
+    :param filter_size: size of the convolution filter
+    :param pool_size: size of the max pooling operation
+    :param summaries: Flag if summaries should be created
     """
-    stddev = math.sqrt(2. / (kl**2 * dl))
-    return tf.truncated_normal_initializer(stddev=stddev)
 
-def orthogonal_initializer(scale = 1.1):
-    ''' From Lasagne and Keras. Reference: Saxe et al., http://arxiv.org/abs/1312.6120
-    '''
-    def _initializer(shape, dtype=tf.float32, partition_info=None):
-      flat_shape = (shape[0], np.prod(shape[1:]))
-      a = np.random.normal(0.0, 1.0, flat_shape)
-      u, _, v = np.linalg.svd(a, full_matrices=False)
-      # pick the one with the correct shape
-      q = u if u.shape == flat_shape else v
-      q = q.reshape(shape) #this needs to be corrected to float32
-      return tf.constant(scale * q[:shape[0], :shape[1]], dtype=tf.float32)
-    return _initializer
+    logging.info(
+        "Layers {layers}, features {features}, filter size {filter_size}x{filter_size}, pool size: {pool_size}x{pool_size}".format(
+            layers=layers,
+            features=features_root,
+            filter_size=filter_size,
+            pool_size=pool_size))
 
-### graph units ###
+    # Placeholder for the input image
+    with tf.name_scope("preprocessing"):
+        nx = tf.shape(x)[1]
+        ny = tf.shape(x)[2]
+        #nx=32
+        #ny=128
+        #channels=1
+        x_image = tf.reshape(x, tf.stack([-1, nx, ny, channels]))
+        in_node = x_image
+        batch_size = tf.shape(x_image)[0]
 
-def conv_layer_with_bn(inputT, shape, train_phase, activation=True, name=None):
-    in_channel = shape[2]
-    out_channel = shape[3]
-    k_size = shape[0]
-    with tf.variable_scope(name) as scope:
-      kernel = _variable_with_weight_decay('ort_weights', shape=shape, initializer=orthogonal_initializer(), wd=None)
-      conv = tf.nn.conv2d(inputT, kernel, [1, 1, 1, 1], padding='SAME')
-      biases = _variable_on_cpu('biases', [out_channel], tf.constant_initializer(0.0))
-      bias = tf.nn.bias_add(conv, biases)
-      if activation is True:
-        conv_out = tf.nn.relu(batch_norm_layer(bias, train_phase, scope.name))
-      else:
-        conv_out = batch_norm_layer(bias, train_phase, scope.name)
-    return conv_out
+    weights = []
+    biases = []
+    convs = []
+    pools = OrderedDict()
+    deconv = OrderedDict()
+    dw_h_convs = OrderedDict()
+    up_h_convs = OrderedDict()
 
-def get_deconv_filter(f_shape):
-  """
-    reference: https://github.com/MarvinTeichmann/tensorflow-fcn
-  """
-  width = f_shape[0]
-  heigh = f_shape[0]
-  f = ceil(width/2.0)
-  c = (2 * f - 1 - f % 2) / (2.0 * f)
-  bilinear = np.zeros([f_shape[0], f_shape[1]])
-  for x in range(width):
-      for y in range(heigh):
-          value = (1 - abs(x / f - c)) * (1 - abs(y / f - c))
-          bilinear[x, y] = value
-  weights = np.zeros(f_shape)
-  for i in range(f_shape[2]):
-      weights[:, :, i, i] = bilinear
+    in_size = 1000  #?????????????????????
+    size = in_size
+    # down layers
+    for layer in range(0, layers):
+        with tf.name_scope("down_conv_{}".format(str(layer))):
+            features = 2 ** layer * features_root
+            stddev = np.sqrt(2 / (filter_size ** 2 * features))
+            if layer == 0:
+                w1 = weight_variable([filter_size, filter_size, channels, features], stddev, name="w1")
+            else:
+                w1 = weight_variable([filter_size, filter_size, features // 2, features], stddev, name="w1")
 
-  init = tf.constant_initializer(value=weights,
-                                 dtype=tf.float32)
-  return tf.get_variable(name="up_filter", initializer=init,
-                         shape=weights.shape)
+            w2 = weight_variable([filter_size, filter_size, features, features], stddev, name="w2")
+            b1 = bias_variable([features], name="b1")
+            b2 = bias_variable([features], name="b2")
 
-def deconv_layer(inputT, f_shape, output_shape, stride=2, name=None):
-  # output_shape = [b, w, h, c]
-  # sess_temp = tf.InteractiveSession()
-  sess_temp = tf.global_variables_initializer()
-  strides = [1, stride, stride, 1]
-  with tf.variable_scope(name):
-    weights = get_deconv_filter(f_shape)
-    deconv = tf.nn.conv2d_transpose(inputT, weights, output_shape,
-                                        strides=strides, padding='SAME')
-  return deconv
+            conv1 = conv2d(in_node, w1, b1, keep_prob)
+            print(str(layer)+' conv1: '+str(conv1.get_shape()))
+            tmp_h_conv = tf.nn.relu(conv1)
+            conv2 = conv2d(tmp_h_conv, w2, b2, keep_prob)
+            print(str(layer)+' conv2: '+str(conv2.get_shape()))
+            dw_h_convs[layer] = tf.nn.relu(conv2)
 
-def batch_norm_layer(inputT, is_training, scope):
-  return tf.cond(is_training,
-          lambda: tf.contrib.layers.batch_norm(inputT, is_training=True,
-                           center=False, updates_collections=None, scope=scope+"_bn"),
-          lambda: tf.contrib.layers.batch_norm(inputT, is_training=False,
-                           updates_collections=None, center=False, scope=scope+"_bn", reuse = True))
+            weights.append((w1, w2))
+            biases.append((b1, b2))
+            convs.append((conv1, conv2))
 
+            size -= 2 * 2 * (filter_size // 2) # valid conv
+            if layer < layers - 1:
+                pools[layer] = max_pool(dw_h_convs[layer], pool_size)
+                in_node = pools[layer]
+                size /= pool_size
+
+    in_node = dw_h_convs[layers - 1]
+
+    # up layers
+    for layer in range(layers - 2, -1, -1):
+        with tf.name_scope("up_conv_{}".format(str(layer))):
+            features = 2 ** (layer + 1) * features_root
+            stddev = np.sqrt(2 / (filter_size ** 2 * features))
+
+            wd = weight_variable_devonc([pool_size, pool_size, features // 2, features], stddev, name="wd")
+            bd = bias_variable([features // 2], name="bd")
+            h_deconv = tf.nn.relu(deconv2d(in_node, wd, pool_size) + bd)
+            print(str(layer)+' h_deconv: '+str(h_deconv.get_shape()))
+            h_deconv_concat = crop_and_concat(dw_h_convs[layer], h_deconv)
+            print(str(layer)+' h_deconv_concat: '+str(h_deconv_concat.get_shape()))
+            deconv[layer] = h_deconv_concat
+
+            w1 = weight_variable([filter_size, filter_size, features, features // 2], stddev, name="w1")
+            w2 = weight_variable([filter_size, filter_size, features // 2, features // 2], stddev, name="w2")
+            b1 = bias_variable([features // 2], name="b1")
+            b2 = bias_variable([features // 2], name="b2")
+
+            conv1 = conv2d(h_deconv_concat, w1, b1, keep_prob)
+            h_conv = tf.nn.relu(conv1)
+            print(str(layer)+' h_conv1_post_deconv: '+str(h_conv.get_shape()))
+            conv2 = conv2d(h_conv, w2, b2, keep_prob)
+            in_node = tf.nn.relu(conv2)
+            up_h_convs[layer] = in_node
+            print(str(layer)+' h_conv2_post_deconv: '+str(in_node.get_shape()))
+
+            weights.append((w1, w2))
+            biases.append((b1, b2))
+            convs.append((conv1, conv2))
+
+            size *= pool_size
+            size -= 2 * 2 * (filter_size // 2) # valid conv
+
+    # Output Map
+    with tf.name_scope("output_map"):
+        weight = weight_variable([1, 1, features_root, n_class], stddev)
+        bias = bias_variable([n_class], name="bias")
+        conv = conv2d(in_node, weight, bias, tf.constant(1.0))
+        print(str(layer)+' outmap: '+str(conv.get_shape()))
+        
+        #output_map = tf.nn.relu(conv)
+        output_map=conv # no activation, to be consistant with other models and leverage previous loss/prediction structures yike !!!!
+        up_h_convs["out"] = output_map
+
+    if summaries:
+        with tf.name_scope("summaries"):
+            for i, (c1, c2) in enumerate(convs):
+                tf.summary.image('summary_conv_%02d_01' % i, get_image_summary(c1))
+                tf.summary.image('summary_conv_%02d_02' % i, get_image_summary(c2))
+
+            for k in pools.keys():
+                tf.summary.image('summary_pool_%02d' % k, get_image_summary(pools[k]))
+
+            for k in deconv.keys():
+                tf.summary.image('summary_deconv_concat_%02d' % k, get_image_summary(deconv[k]))
+
+            for k in dw_h_convs.keys():
+                tf.summary.histogram("dw_convolution_%02d" % k + '/activations', dw_h_convs[k])
+
+            for k in up_h_convs.keys():
+                tf.summary.histogram("up_convolution_%s" % k + '/activations', up_h_convs[k])
+
+    variables = []
+    for w1, w2 in weights:
+        variables.append(w1)
+        variables.append(w2)
+
+    for b1, b2 in biases:
+        variables.append(b1)
+        variables.append(b2)
+
+    return output_map, variables, int(in_size - size)
 
 ### model ###
 
@@ -223,90 +354,19 @@ class Model:
     
     def setup_graph(self, images, phase_train): # previous inference() labels,inference, batch_size -- in order to get batch_size at running time 
        #rather than using fixed batch_size in graph set up, revise it in inference:
-       batchsize=tf.shape(images)[0] # yike !!!
+       #batchsize=tf.shape(images)[0] # yike !!!
        print('GGG')
-       print(images.get_shape())
-       # norm1
-       norm1 = tf.nn.lrn(images, depth_radius=5, bias=1.0, alpha=0.0001, beta=0.75,name='norm1')
-       print(norm1.get_shape())
-       # conv1
-       conv1 = conv_layer_with_bn(norm1, [7, 7, images.get_shape().as_list()[3], 64], phase_train, name="conv1") # yike: 7 too large? how about 3?
-       print(conv1.get_shape())
-       # pool1
-       pool1, pool1_indices = tf.nn.max_pool_with_argmax(conv1, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1],padding='SAME', name='pool1')
-       print('111111')
-       print(pool1.get_shape())
-       print(pool1_indices.get_shape())
-       # conv2
-       conv2 = conv_layer_with_bn(pool1, [7, 7, 64, 64], phase_train, name="conv2")
-    
+       input_shape=images.get_shape().as_list()
+       print(input_shape)
 
-       # pool2
-       pool2, pool2_indices = tf.nn.max_pool_with_argmax(conv2, ksize=[1, 2, 2, 1],strides=[1, 2, 2, 1], padding='SAME', name='pool2')
-       print('22222')
-       print(pool2.get_shape())
-       print(pool2_indices.get_shape())
-
-
-       # conv3
-       conv3 = conv_layer_with_bn(pool2, [7, 7, 64, 64], phase_train, name="conv3")
-
-       # pool3
-       pool3, pool3_indices = tf.nn.max_pool_with_argmax(conv3, ksize=[1, 2, 2, 1],
-                           strides=[1, 2, 2, 1], padding='SAME', name='pool3')
-
-       print('33333')
-       print(pool3.get_shape())
-       print(pool3_indices.get_shape())
-
-       # conv4
-       conv4 = conv_layer_with_bn(pool3, [7, 7, 64, 64], phase_train, name="conv4")
-
-       # pool4
-       pool4, pool4_indices = tf.nn.max_pool_with_argmax(conv4, ksize=[1, 2, 2, 1],
-                           strides=[1, 2, 2, 1], padding='SAME', name='pool4')
-       print('44444')
-       print(pool4.get_shape())
-       print(pool4_indices.get_shape())
-
-       """ End of encoder """
-       """ start upsample """
-       # upsample4
-       # Need to change when using different dataset out_w, out_h
-       # upsample4 = upsample_with_pool_indices(pool4, pool4_indices, pool4.get_shape(), out_w=45, out_h=60, scale=2, name='upsample4')
-       pool3_shape=pool3.get_shape()
-       upsample4 = deconv_layer(pool4, [2, 2, 64, 64], tf.stack([batchsize, pool3_shape[1],pool3_shape[2], 64]), 2, "up4") #45, 60,
-       #print(tf.stack([batchsize, 45, 60, 64]))
-       # decode 4
-       conv_decode4 = conv_layer_with_bn(upsample4, [7, 7, 64, 64], phase_train, False, name="conv_decode4")
-       print('d4444444')
-       print(conv_decode4.get_shape())
-       # upsample 3
-       # upsample3 = upsample_with_pool_indices(conv_decode4, pool3_indices, conv_decode4.get_shape(), scale=2, name='upsample3')
-       pool2_shape=pool2.get_shape()
-       upsample3= deconv_layer(conv_decode4, [2, 2, 64, 64], tf.stack([batchsize, pool2_shape[1],pool2_shape[2], 64]), 2, "up3") #90, 120
-       # decode 3
-       conv_decode3 = conv_layer_with_bn(upsample3, [7, 7, 64, 64], phase_train, False, name="conv_decode3")
-       print('d333333')
-       print(conv_decode3.get_shape())
-       # upsample2
-       # upsample2 = upsample_with_pool_indices(conv_decode3, pool2_indices, conv_decode3.get_shape(), scale=2, name='upsample2')
-       pool1_shape=pool1.get_shape()
-       upsample2= deconv_layer(conv_decode3, [2, 2, 64, 64], tf.stack([batchsize, pool1_shape[1],pool1_shape[2], 64]), 2, "up2") #180, 240
-       # decode 2
-       conv_decode2 = conv_layer_with_bn(upsample2, [7, 7, 64, 64], phase_train, False, name="conv_decode2")
-       print('d22222')
-       print(conv_decode2.get_shape()) 
-       # upsample1
-       # upsample1 = upsample_with_pool_indices(conv_decode2, pool1_indices, conv_decode2.get_shape(), scale=2, name='upsample1')
-       upsample1=deconv_layer(conv_decode2, [2, 2, 64, 64], tf.stack([batchsize,self.args.image_h,self.args.image_w , 64]), 2, "up1") # IMAGE_HEIGHT, IMAGE_WIDTH yike !!!! deconv_layer(conv_decode2, [2, 2, 64, 64], [batch_size, 360, 480, 64], 2, "up1")
-       # decode4
-       conv_decode1 = conv_layer_with_bn(upsample1, [7, 7, 64, 64], phase_train, False, name="conv_decode1")
-       print('d111111')
-       print(conv_decode1.get_shape())
-    
-       """ end of Decode """
+#       create_conv_net(x, keep_prob, channels, n_class, layers=3, features_root=16, filter_size=3, pool_size=2,
+#                    summaries=True) 
+        
+       logit,_,__=create_conv_net(x=images, keep_prob=0.8, channels=input_shape[3], n_class=self.num_classes, layers=3, features_root=32, filter_size=3) 
+       print(logit.get_shape()) 
+       ''' 
        """ Start Classify """
+       
        # output predicted class number (6)
        with tf.variable_scope('conv_classifier') as scope:
          kernel = _variable_with_weight_decay('weights',
@@ -328,7 +388,7 @@ class Model:
     
          #loss = cal_loss(conv_classifier, labels)
          print(logit.get_shape())
-
+         '''
        return logit # loss
 
     ###4. initialization###

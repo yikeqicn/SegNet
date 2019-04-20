@@ -130,8 +130,8 @@ class ArtPrintNoIntsect(data.Dataset):
       # makes list of characters
       #      chars = chars.union(set(list(label)))
     #self.charList = sorted(list(chars))
-      #if ct>=1000:
-      #  break
+      #if ct>=10000:
+        #break
   def __str__(self):
     return 'Artifact word image dataset - no intersect label. Data location: '+self.root+', Length: '+str(len(self.samples))
 

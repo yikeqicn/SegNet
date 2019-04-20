@@ -281,25 +281,28 @@ class Model:
        conv_decode4 = conv_layer_with_bn(upsample4, [7, 7, 64, 64], phase_train, False, name="conv_decode4")
        print('d4444444')
        print(conv_decode4.get_shape())
+       combine_conv_decode4=tf.concat(axis=3, values=(conv_decode4, pool3)) #yike !!!!!
        # upsample 3
        # upsample3 = upsample_with_pool_indices(conv_decode4, pool3_indices, conv_decode4.get_shape(), scale=2, name='upsample3')
        pool2_shape=pool2.get_shape()
-       upsample3= deconv_layer(conv_decode4, [2, 2, 64, 64], tf.stack([batchsize, pool2_shape[1],pool2_shape[2], 64]), 2, "up3") #90, 120
+       upsample3= deconv_layer(combine_conv_decode4, [2, 2, 128, 64], tf.stack([batchsize, pool2_shape[1],pool2_shape[2], 64]), 2, "up3") #90, 120 #yike!!!!!
        # decode 3
        conv_decode3 = conv_layer_with_bn(upsample3, [7, 7, 64, 64], phase_train, False, name="conv_decode3")
        print('d333333')
        print(conv_decode3.get_shape())
+       combine_conv_decode3=tf.concat(axis=3, values=(conv_decode3, pool2)) #yike !!!!!
        # upsample2
        # upsample2 = upsample_with_pool_indices(conv_decode3, pool2_indices, conv_decode3.get_shape(), scale=2, name='upsample2')
        pool1_shape=pool1.get_shape()
-       upsample2= deconv_layer(conv_decode3, [2, 2, 64, 64], tf.stack([batchsize, pool1_shape[1],pool1_shape[2], 64]), 2, "up2") #180, 240
+       upsample2= deconv_layer(combine_conv_decode3, [2, 2, 128, 64], tf.stack([batchsize, pool1_shape[1],pool1_shape[2], 64]), 2, "up2") #180, 240 #yike !!!!!
        # decode 2
        conv_decode2 = conv_layer_with_bn(upsample2, [7, 7, 64, 64], phase_train, False, name="conv_decode2")
        print('d22222')
        print(conv_decode2.get_shape()) 
+       combine_conv_decode2=tf.concat(axis=3, values=(conv_decode2, pool1)) #yike !!!!! 
        # upsample1
        # upsample1 = upsample_with_pool_indices(conv_decode2, pool1_indices, conv_decode2.get_shape(), scale=2, name='upsample1')
-       upsample1=deconv_layer(conv_decode2, [2, 2, 64, 64], tf.stack([batchsize,self.args.image_h,self.args.image_w , 64]), 2, "up1") # IMAGE_HEIGHT, IMAGE_WIDTH yike !!!! deconv_layer(conv_decode2, [2, 2, 64, 64], [batch_size, 360, 480, 64], 2, "up1")
+       upsample1=deconv_layer(combine_conv_decode2, [2, 2, 128, 64], tf.stack([batchsize,self.args.image_h,self.args.image_w , 64]), 2, "up1") # IMAGE_HEIGHT, IMAGE_WIDTH yike !!!! deconv_layer(conv_decode2, [2, 2, 64, 64], [batch_size, 360, 480, 64], 2, "up1") yike!!!!!
        # decode4
        conv_decode1 = conv_layer_with_bn(upsample1, [7, 7, 64, 64], phase_train, False, name="conv_decode1")
        print('d111111')
@@ -389,12 +392,11 @@ class Model:
        "train NN"
        epoch = 0  # number of training epochs since start
        best_accuracy=0.0
-       step = 0
        while True:
          epoch += 1; print('Epoch:', epoch, ' Training...')
          # train
          counter = 0
-         #step = 0 
+         step = 0 
          for idx, (images, labels) in enumerate(loader):
             images=images.numpy()
             labels=labels.numpy()
@@ -409,24 +411,17 @@ class Model:
                                    #self.input_labels: labels,
                                    #self.learning_rate: lr, 
                                    self.phase_train: False})
-              train_acc,train_acc_classes=per_class_acc(logits,labels)  # check in, comment out in formal run
-
-         # train log:
-         self.experiment.log_metric('train/acc',train_acc,step)
-         self.experiment.log_metric('train/cap_0',train_acc_classes[0],step)
-         self.experiment.log_metric('train/cap_1',train_acc_classes[1],step)
-                
+              per_class_acc(logits,labels)  # check in, comment out in formal run
+            
          #validate:
          if validateloader !=None: 
-           avg_batch_loss,acc_total,cap_0,cap_1=self.validate(validateloader,epoch)
+           acc_total,cap_0,cap_1=self.validate(validateloader,epoch)
          else:
-           avg_batch_loss,acc_total,cap_0,cap_1=self.validate(loader,epoch)
+           acc_total,cap_0,cap_1=self.validate(loader,epoch)
          self.experiment.log_metric('valid/acc',acc_total,step)
          self.experiment.log_metric('valid/cap_0',cap_0,step)
          self.experiment.log_metric('valid/cap_1',cap_1,step)
-         self.experiment.log_metric('valid/loss',avg_batch_loss,step)   
          
-
          #test:
          if testloader !=None:
            acc_total,cap_0,cap_1=self.validate(testloader,epoch,is_testing=True)
@@ -458,28 +453,27 @@ class Model:
        if not is_testing: print('Validating NN')
        else: print('Testing NN')
        total_val_loss = 0.0
-       #num_batches=len(loader)
        hist= np.zeros((self.num_classes, self.num_classes))
         
        image_upload_count=0 
        for idx, (images, labels) in enumerate(loader):
          images=images.numpy()
          labels=labels.numpy()
-         val_loss,val_logit=self.sess.run([self.loss,self.logit],feed_dict=
+         val_logit=self.sess.run(self.logit,feed_dict=
                                 {self.input_images: images, # check in, comment out in formal run
                                 self.input_labels: labels,
                                 self.phase_train: False}) #self.loss,val_loss,
           
-         total_val_loss+=val_loss
+         #total_val_loss+=val_loss
          hist+=get_hist(val_logit,labels)
        #val_loss=total_val_loss / len(validateloader)*batch_size
 
-         if epoch==self.args.max_epoch and image_upload_count<100: # decide how many images to upload
+         if epoch==self.args.max_epoch and image_upload_count<10: # decide how many images to upload
             pred=val_logit.argmax(3)
             images=np.squeeze(images,axis=3)
             image_upload_count=log_images(images,pred,image_upload_count,self.experiment,self.args.ckptpath)
             
-       avg_batch_loss=total_val_loss/idx     
+            
        cls_sample_nums=hist.sum(1).astype(float)
        capture_array=np.diag(hist)
        acc_total = capture_array.sum() / hist.sum()
@@ -493,7 +487,7 @@ class Model:
        #iu = np.diag(hist) / (hist.sum(1) + hist.sum(0) - np.diag(hist))
        #mean_iu=np.nanmean(iu)
        print('VALID: Total accuracy: %f%%. Class 0 capture: %f%%. Class 1 capture: %f%%' % (acc_total * 100.0, capture_rate_ls[0] * 100.0, capture_rate_ls[1]*100.0)) 
-       return avg_batch_loss,acc_total,capture_rate_ls[0],capture_rate_ls[1]
+       return acc_total,capture_rate_ls[0],capture_rate_ls[1]
     
     ###7. infer ###
     def inferBatch(self, imgs): # modify to compatible to torch. previous def inferBatch(self, batch)

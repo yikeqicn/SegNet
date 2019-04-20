@@ -6,6 +6,23 @@ import cv2
 import os
 import time
 
+def get_image_summary(img, idx=0):
+    """
+    Make an image summary for 4d tensor image with index idx
+    """
+
+    V = tf.slice(img, (0, 0, 0, idx), (1, -1, -1, 1))
+    V -= tf.reduce_min(V)
+    V /= tf.reduce_max(V)
+    V *= 255
+
+    img_w = tf.shape(img)[1]
+    img_h = tf.shape(img)[2]
+    V = tf.reshape(V, tf.stack((img_w, img_h, 1)))
+    V = tf.transpose(V, (2, 0, 1))
+    V = tf.reshape(V, tf.stack((-1, img_w, img_h, 1)))
+    return V
+
 def log_images(images,pred,image_upload_count,experiment,path):  
   zp=zip(images,pred)
   for im_orig,prdt in zp:
@@ -205,9 +222,12 @@ def per_class_acc(predictions, label_tensor):
     print ('accuracy = %f'%np.nanmean(acc_total))
     iu = np.diag(hist) / (hist.sum(1) + hist.sum(0) - np.diag(hist))
     print ('mean IU  = %f'%np.nanmean(iu))
+    acc_classes=[]
     for ii in range(num_class):
         if float(hist.sum(1)[ii]) == 0:
           acc = 0.0
         else:
           acc = np.diag(hist)[ii] / float(hist.sum(1)[ii])
-        print("    class # %d accuracy = %f "%(ii,acc))
+        print("    class # %d capture rate = %f "%(ii,acc))
+        acc_classes.append(acc)
+    return acc_total, acc_classes    
